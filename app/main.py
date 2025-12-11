@@ -49,21 +49,55 @@ app = FastAPI(
 setup_logging()
 logger = logging.getLogger(__name__)
 
+
+def build_cors_config():
+    """Build CORS settings, expanding defaults for local/private network hosts."""
+    default_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3034",
+        "http://localhost:5273",
+        "http://127.0.0.1:5273",
+        "http://10.1.2.149:5273",
+    ]
+
+    # Allow a single UI origin shortcut
+    ui_origin = (
+        os.getenv("UI_ORIGIN")
+        or os.getenv("FRONTEND_ORIGIN")
+        or os.getenv("UI_BASE_URL")
+    )
+    if ui_origin:
+        default_origins.append(ui_origin)
+
+    # Allow comma-separated overrides via env var (keeps defaults unless explicitly removed later)
+    env_origins = os.getenv("CORS_ORIGINS")
+    if env_origins:
+        default_origins.extend(
+            [origin.strip() for origin in env_origins.split(",") if origin.strip()]
+        )
+
+    # Permit any local/private network host + port by default; override with CORS_ORIGIN_REGEX
+    origin_regex = os.getenv(
+        "CORS_ORIGIN_REGEX",
+        r"https?://(localhost|127\\.0\\.0\\.1|10\\.\d+\\.\d+\\.\d+|192\\.168\\.\d+\\.\d+|172\\.(1[6-9]|2\\d|3[0-1])\\.\d+\\.\d+)(:\\d+)?$",
+    )
+
+    # Remove duplicates while preserving order
+    unique_origins = list(dict.fromkeys(default_origins))
+    return unique_origins, origin_regex
+
 # Add request logging middleware
 app.add_middleware(RequestLoggingMiddleware)
 # Add Prometheus metrics middleware
 app.add_middleware(PrometheusMiddleware)
 
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3034",
-]
-
 # CORS (if frontend served separately)
+cors_origins, cors_origin_regex = build_cors_config()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

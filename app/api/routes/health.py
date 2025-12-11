@@ -7,6 +7,7 @@ router = APIRouter()
 
 
 @router.get("/")
+@router.get("")  # allow /health without trailing slash to avoid CORS-breaking redirect
 async def health_check():
     # 1. Check writable paths
     try:

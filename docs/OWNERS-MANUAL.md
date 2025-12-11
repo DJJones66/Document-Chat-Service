@@ -122,7 +122,7 @@ Chat with your documents using AI. Upload PDFs, Word docs, or text files, then a
 ### Prerequisites
 
 **Required:**
-- Python 3.12+
+- Python 3.11+
 - Ollama server (local or remote)
 - Document Processor API (BrainDrive-Document-AI)
 

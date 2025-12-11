@@ -8,7 +8,7 @@ A sophisticated RAG (Retrieval-Augmented Generation) application built on **Clea
 
 **Core Technologies:**
 - FastAPI (async web framework)
-- Python 3.12+ with Poetry dependency management
+- Python 3.11+ with Poetry dependency management
 - Ollama (LLM and embeddings)
 - ChromaDB (vector store)
 - BM25 + Rank Fusion (hybrid search)

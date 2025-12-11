@@ -194,7 +194,16 @@ async def search_documents(
             generation_type=result.generation_type.value if result.generation_type else "",
             metadata=result.metadata
         )
-        
+
+        logger.info(
+            "Search completed: query='%s' collection=%s intent=%s chunks=%d meta_keys=%s",
+            req.query_text,
+            req.collection_id or "ALL",
+            response.intent.type if response.intent else "unknown",
+            len(response.chunks),
+            list(response.metadata.keys()),
+        )
+
         return response
         
     except Exception as e:

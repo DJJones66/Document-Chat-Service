@@ -152,7 +152,7 @@ This method allows you to run the application directly on your machine, which is
 
 #### Prerequisites
 
-  * [Python 3.12](https://www.python.org/downloads/)
+  * [Python 3.11+](https://www.python.org/downloads/)
   * [Poetry](https://www.google.com/search?q=https://python-poetry.org/docs/%23installation) for dependency management.
   * An [Ollama](https://ollama.com/) server running locally or accessible via a URL.
   * An accessible instance of the [BrainDrive-Document-AI](https://github.com/BrainDriveAI/BrainDrive-Document-AI) service for document processing.

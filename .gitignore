@@ -6,6 +6,9 @@
 __pycache__/
 
 venv/
+.venv/
+
+.run/
 
 Dockerfile.dev
 
@@ -21,3 +24,7 @@ data
 # AI agent files (temporary, not for repo)
 .cursorrules
 .changeset/
+
+
+tests/
+designs/
