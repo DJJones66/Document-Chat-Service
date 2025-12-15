@@ -52,6 +52,11 @@ logger = logging.getLogger(__name__)
 
 def build_cors_config():
     """Build CORS settings, expanding defaults for local/private network hosts."""
+    allow_any = os.getenv("CORS_ALLOW_ANY", "1").lower() in ("1", "true", "yes", "on")
+    if allow_any:
+        # Wildcard requires credentials to be disabled
+        return ["*"], ".*", False
+
     default_origins = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -83,9 +88,11 @@ def build_cors_config():
         r"https?://(localhost|127\\.0\\.0\\.1|10\\.\d+\\.\d+\\.\d+|192\\.168\\.\d+\\.\d+|172\\.(1[6-9]|2\\d|3[0-1])\\.\d+\\.\d+)(:\\d+)?$",
     )
 
+    allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() in ("1", "true", "yes", "on")
+
     # Remove duplicates while preserving order
     unique_origins = list(dict.fromkeys(default_origins))
-    return unique_origins, origin_regex
+    return unique_origins, origin_regex, allow_credentials
 
 # Add request logging middleware
 app.add_middleware(RequestLoggingMiddleware)
@@ -93,12 +100,12 @@ app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(PrometheusMiddleware)
 
 # CORS (if frontend served separately)
-cors_origins, cors_origin_regex = build_cors_config()
+cors_origins, cors_origin_regex, cors_allow_credentials = build_cors_config()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_origin_regex=cors_origin_regex,
-    allow_credentials=True,
+    allow_credentials=cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
