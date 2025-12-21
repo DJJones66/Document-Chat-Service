@@ -14,6 +14,7 @@ Environment overrides:
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -52,7 +53,13 @@ def main() -> None:
         cmd.append("--reload")
 
     print("Starting service with:\n ", " ".join(cmd))
-    subprocess.check_call(cmd, cwd=REPO_ROOT)
+    try:
+        subprocess.check_call(cmd, cwd=REPO_ROOT)
+    except subprocess.CalledProcessError as exc:
+        if exc.returncode in (-signal.SIGTERM, -signal.SIGINT):
+            print("Service stopped.")
+            return
+        raise
 
 
 if __name__ == "__main__":

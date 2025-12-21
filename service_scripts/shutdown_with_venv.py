@@ -9,6 +9,7 @@ Environment overrides:
   PID_FILE           PID file to check before searching (default: .run/uvicorn.pid)
   PROCESS_NAME       Process name to match when PID file is absent (default: uvicorn)
   PROCESS_CMD_MATCH  Command-line substring to validate targets (default: app.main:app)
+  PROCESS_PORT       Expected service port (falls back to API_PORT when set)
   SHUTDOWN_TIMEOUT   Seconds to wait after SIGTERM before force killing (default: 10)
 """
 from __future__ import annotations
@@ -26,6 +27,7 @@ from venv_utils import REPO_ROOT
 DEFAULT_PID_FILE = Path(os.environ.get("PID_FILE", REPO_ROOT / ".run" / "uvicorn.pid"))
 DEFAULT_PROCESS_NAME = os.environ.get("PROCESS_NAME", "uvicorn")
 DEFAULT_CMD_MATCH = os.environ.get("PROCESS_CMD_MATCH", "app.main:app")
+DEFAULT_PROCESS_PORT = os.environ.get("PROCESS_PORT") or os.environ.get("API_PORT")
 DEFAULT_TIMEOUT = float(os.environ.get("SHUTDOWN_TIMEOUT", "10"))
 
 
@@ -68,18 +70,47 @@ def _read_cmdline(pid: int) -> str:
         return ""
 
 
-def _looks_like_service(cmdline: str, process_name: str, cmd_match: str) -> bool:
+def _read_cwd(pid: int) -> str:
+    if os.name == "nt":
+        return ""
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except Exception:
+        return ""
+
+
+def _looks_like_service(
+    cmdline: str,
+    process_name: str,
+    cmd_match: str,
+    *,
+    cwd: str = "",
+    port: str | None = None,
+) -> bool:
     if not cmdline:
         return False
     lowered = cmdline.lower()
     name_ok = not process_name or process_name.lower() in lowered
     cmd_ok = not cmd_match or cmd_match.lower() in lowered
-    # Ensure we only target processes launched from this repo when possible.
-    repo_ok = str(REPO_ROOT) in cmdline
-    return name_ok and cmd_ok and (repo_ok or cmd_ok)
+    port_token = str(port).strip() if port else ""
+    if port_token:
+        port_lower = port_token.lower()
+        port_ok = f"--port {port_lower}" in lowered or f"--port={port_lower}" in lowered
+    else:
+        port_ok = True
+    repo_ok = str(REPO_ROOT).lower() in lowered
+    cwd_ok = False
+    if cwd:
+        try:
+            cwd_path = Path(cwd).resolve()
+            cwd_ok = cwd_path == REPO_ROOT or REPO_ROOT in cwd_path.parents
+        except Exception:
+            cwd_ok = False
+    scope_ok = repo_ok or cwd_ok or (bool(port_token) and port_ok)
+    return name_ok and cmd_ok and port_ok and scope_ok
 
 
-def _scan_processes(process_name: str, cmd_match: str) -> Iterable[Tuple[int, str]]:
+def _scan_processes(process_name: str, cmd_match: str, port: str | None) -> Iterable[Tuple[int, str]]:
     if os.name == "nt":
         try:
             out = subprocess.check_output(
@@ -101,7 +132,7 @@ def _scan_processes(process_name: str, cmd_match: str) -> Iterable[Tuple[int, st
             pid = int(pid_str)
             if pid == os.getpid():
                 continue
-            if _looks_like_service(cmdline, process_name, cmd_match):
+            if _looks_like_service(cmdline, process_name, cmd_match, port=port):
                 results.append((pid, cmdline))
         return results
 
@@ -124,19 +155,21 @@ def _scan_processes(process_name: str, cmd_match: str) -> Iterable[Tuple[int, st
         pid = int(pid_str)
         if pid == os.getpid():
             continue
-        if _looks_like_service(cmdline, process_name, cmd_match):
+        cwd = _read_cwd(pid)
+        if _looks_like_service(cmdline, process_name, cmd_match, cwd=cwd, port=port):
             results.append((pid, cmdline))
     return results
 
 
-def _gather_targets(pid_file: Path, process_name: str, cmd_match: str) -> Dict[int, str]:
+def _gather_targets(pid_file: Path, process_name: str, cmd_match: str, port: str | None) -> Dict[int, str]:
     targets: Dict[int, str] = {}
 
     file_pid = _read_pid(pid_file)
     if file_pid:
         if _pid_is_running(file_pid):
             cmdline = _read_cmdline(file_pid)
-            if _looks_like_service(cmdline, process_name, cmd_match):
+            cwd = _read_cwd(file_pid)
+            if _looks_like_service(cmdline, process_name, cmd_match, cwd=cwd, port=port):
                 targets[file_pid] = f"pid file ({pid_file})"
             else:
                 print(
@@ -148,7 +181,7 @@ def _gather_targets(pid_file: Path, process_name: str, cmd_match: str) -> Dict[i
             print(f"PID {file_pid} from {pid_file} is not running. Removing stale pid file.")
             pid_file.unlink(missing_ok=True)
 
-    for pid, cmdline in _scan_processes(process_name, cmd_match):
+    for pid, cmdline in _scan_processes(process_name, cmd_match, port):
         targets.setdefault(pid, f"process search: {cmdline}")
 
     return targets
@@ -189,13 +222,14 @@ def shutdown_service(
     pid_file: Path = DEFAULT_PID_FILE,
     process_name: str = DEFAULT_PROCESS_NAME,
     cmd_match: str = DEFAULT_CMD_MATCH,
+    port: str | None = DEFAULT_PROCESS_PORT,
     timeout: float = DEFAULT_TIMEOUT,
     quiet: bool = False,
 ) -> bool:
     """
     Attempt to stop the running service. Returns True if the service is no longer running.
     """
-    targets = _gather_targets(pid_file, process_name, cmd_match)
+    targets = _gather_targets(pid_file, process_name, cmd_match, port)
     if not targets:
         if not quiet:
             print("No running service processes found.")
@@ -220,7 +254,7 @@ def shutdown_service(
             print(f"PID {pid} may still be running; please verify manually.")
 
     # Double-check no matching processes remain.
-    remaining = list(_scan_processes(process_name, cmd_match))
+    remaining = list(_scan_processes(process_name, cmd_match, port))
     if remaining:
         success = False
         if not quiet:
