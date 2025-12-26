@@ -29,10 +29,25 @@ from shutdown_with_venv import (
     DEFAULT_TIMEOUT,
     shutdown_service,
 )
-from venv_utils import DEFAULT_VENV_DIR, venv_exists
+from venv_utils import DEFAULT_VENV_DIR, REPO_ROOT, venv_exists
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        os.environ[key] = value.strip().strip('"').strip("'")
 
 
 def main() -> None:
+    _load_env_file(REPO_ROOT / ".env")
     pid_file = Path(os.environ.get("PID_FILE", DEFAULT_PID_FILE))
     process_name = os.environ.get("PROCESS_NAME", DEFAULT_PROCESS_NAME)
     cmd_match = os.environ.get("PROCESS_CMD_MATCH", DEFAULT_CMD_MATCH)

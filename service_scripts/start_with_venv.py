@@ -14,6 +14,7 @@ Environment overrides:
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -28,11 +29,33 @@ def _as_bool(val: str | None, default: bool = False) -> bool:
     return val.lower() in {"1", "true", "yes", "on"}
 
 
+def _ensure_env_file() -> None:
+    env_path = REPO_ROOT / ".env"
+    if env_path.exists():
+        return
+    example_path = REPO_ROOT / ".env.local.example"
+    if example_path.exists():
+        shutil.copyfile(example_path, env_path)
+        print(f"Created {env_path} from {example_path}")
+        return
+    sys.exit("Missing .env and .env.local.example. Create .env or add .env.local.example to continue.")
+
+
+def _set_windows_symlink_defenses() -> None:
+    if os.name != "nt":
+        return
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+
+
 def main() -> None:
     env_name = os.environ.get("VENV_PATH", DEFAULT_VENV_DIR)
     api_host = os.environ.get("API_HOST", "0.0.0.0")
     api_port = os.environ.get("API_PORT", "18000")
     reload_flag = _as_bool(os.environ.get("UVICORN_RELOAD"))
+
+    _ensure_env_file()
+    _set_windows_symlink_defenses()
 
     venv_dir = Path(env_name)
     if not venv_exists(venv_dir):

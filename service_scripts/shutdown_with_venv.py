@@ -98,7 +98,6 @@ def _looks_like_service(
         port_ok = f"--port {port_lower}" in lowered or f"--port={port_lower}" in lowered
     else:
         port_ok = True
-    repo_ok = str(REPO_ROOT).lower() in lowered
     cwd_ok = False
     if cwd:
         try:
@@ -106,7 +105,10 @@ def _looks_like_service(
             cwd_ok = cwd_path == REPO_ROOT or REPO_ROOT in cwd_path.parents
         except Exception:
             cwd_ok = False
-    scope_ok = repo_ok or cwd_ok or (bool(port_token) and port_ok)
+    if cwd or port_token:
+        scope_ok = cwd_ok or (bool(port_token) and port_ok)
+    else:
+        scope_ok = True
     return name_ok and cmd_ok and port_ok and scope_ok
 
 
