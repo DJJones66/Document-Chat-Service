@@ -1,6 +1,8 @@
 import os
 import logging
 import logging
+from urllib.parse import urljoin
+import httpx
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
@@ -321,17 +323,37 @@ async def on_startup():
 
 
 async def verify_ollama_services(app):
-    """Sanity test Ollama LLM and Embedding endpoints to fail fast if not reachable"""
-    logger.info("🔍 Running Ollama service connectivity checks...")
+    """Sanity check Ollama base URLs; optionally run strict model checks."""
+    logger.info("Running Ollama connectivity checks...")
+
+    base_urls = {
+        str(settings.OLLAMA_EMBEDDING_BASE_URL),
+        str(settings.OLLAMA_LLM_BASE_URL),
+    }
+    if settings.ENABLE_CONTEXTUAL_RETRIEVAL:
+        base_urls.add(str(settings.OLLAMA_CONTEXTUAL_LLM_BASE_URL))
+
+    strict_checks = os.getenv("OLLAMA_HEALTH_STRICT", "0").lower() in {"1", "true", "yes", "on"}
 
     try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            for base_url in base_urls:
+                url = urljoin(base_url.rstrip("/") + "/", "api/tags")
+                resp = await client.get(url)
+                resp.raise_for_status()
+                logger.info(f"Ollama reachable at {base_url}")
+
+        if not strict_checks:
+            logger.info("Ollama strict model checks disabled.")
+            return
+
         # Test embedding API
         embedding_service = app.state.embedding_service
         test_text = "health check test"
         emb = await embedding_service.generate_embedding(test_text)
         if not emb or not emb.values:
             raise RuntimeError("Embedding test failed: empty result.")
-        logger.info(f"✅ Embedding service OK ({embedding_service.model_name})")
+        logger.info(f"Embedding service OK ({embedding_service.model_name})")
 
         # Test LLM API
         llm_service = app.state.llm_service
@@ -339,7 +361,7 @@ async def verify_ollama_services(app):
         resp = await llm_service.generate_response(test_prompt)
         if not resp:
             raise RuntimeError("LLM test failed: no response.")
-        logger.info(f"✅ LLM service OK ({llm_service.model_name})")
+        logger.info(f"LLM service OK ({llm_service.model_name})")
 
         # Test contextual LLM (if enabled)
         contextual_llm_service = getattr(app.state, "contextual_llm_service", None)
@@ -347,12 +369,12 @@ async def verify_ollama_services(app):
             resp2 = await contextual_llm_service.generate_response("This is a contextual test")
             if not resp2:
                 raise RuntimeError("Contextual LLM test failed: no response.")
-            logger.info(f"✅ Contextual LLM OK ({contextual_llm_service.model_name})")
+            logger.info(f"Contextual LLM OK ({contextual_llm_service.model_name})")
 
-        logger.info("🚀 Ollama service checks complete. All good.")
+        logger.info("Ollama strict checks complete.")
 
     except Exception as e:
-        logger.error(f"❌ Ollama service health check failed: {e}")
+        logger.error(f"Ollama service health check failed: {e}")
         raise  # Stop startup if core services aren't healthy
 
 

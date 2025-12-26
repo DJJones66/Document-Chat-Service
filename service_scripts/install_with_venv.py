@@ -15,12 +15,81 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 from venv_utils import DEFAULT_VENV_DIR, REPO_ROOT, venv_exists, venv_python
+
+DEFAULT_OLLAMA_EMBED_MODEL = "mxbai-embed-large"
+OLLAMA_MODEL_KEYS = (
+    "OLLAMA_EMBEDDING_MODEL",
+    "OLLAMA_LLM_MODEL",
+    "OLLAMA_CONTEXTUAL_LLM_MODEL",
+)
+
+
+def _parse_env_file(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    values: dict = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        values[key] = value.strip().strip('"').strip("'")
+    return values
+
+
+def _resolve_ollama_models() -> list[str]:
+    env_values: dict = {}
+    for candidate in (REPO_ROOT / ".env", REPO_ROOT / ".env.local.example", REPO_ROOT / ".env.example"):
+        env_values.update(_parse_env_file(candidate))
+    models: list[str] = []
+    for key in OLLAMA_MODEL_KEYS:
+        value = os.environ.get(key) or env_values.get(key)
+        if not value and key == "OLLAMA_EMBEDDING_MODEL":
+            value = DEFAULT_OLLAMA_EMBED_MODEL
+        if not value:
+            continue
+        normalized = value.strip()
+        if not normalized or normalized.lower() in {"none", "null", "false", "disabled"}:
+            continue
+        models.append(normalized)
+    # Deduplicate while preserving order
+    seen = set()
+    ordered: list[str] = []
+    for model in models:
+        if model in seen:
+            continue
+        seen.add(model)
+        ordered.append(model)
+    return ordered
+
+
+def _maybe_pull_ollama_models() -> None:
+    ollama_bin = shutil.which("ollama")
+    if not ollama_bin:
+        return
+    for model_name in _resolve_ollama_models():
+        show_result = subprocess.run(
+            [ollama_bin, "show", model_name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if show_result.returncode == 0:
+            continue
+        try:
+            print(f"Ollama model missing; pulling {model_name}...")
+            subprocess.check_call([ollama_bin, "pull", model_name], cwd=REPO_ROOT)
+        except subprocess.CalledProcessError as exc:
+            print(f"Warning: Ollama model pull failed (will retry at runtime): {exc}")
 
 
 def _as_bool(val: str | None, default: bool = False) -> bool:
@@ -108,6 +177,8 @@ def main() -> None:
         cmd = [str(venv_py), "-m", "pip", "install", "-e", "."]
         print("Installing editable project dependencies (pyproject)...")
         _run_pip(cmd, retry_on_windows=True)
+
+    _maybe_pull_ollama_models()
 
     print("\nDependencies installed into the venv.")
 
