@@ -48,6 +48,16 @@ def _set_windows_symlink_defenses() -> None:
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
 
 
+def _ensure_home_dir_env() -> None:
+    if os.name != "nt":
+        return
+    if os.environ.get("USERPROFILE") or os.environ.get("HOME"):
+        return
+    fallback = str(REPO_ROOT)
+    os.environ.setdefault("USERPROFILE", fallback)
+    os.environ.setdefault("HOME", fallback)
+
+
 def main() -> None:
     env_name = os.environ.get("VENV_PATH", DEFAULT_VENV_DIR)
     api_host = os.environ.get("API_HOST", "0.0.0.0")
@@ -56,6 +66,7 @@ def main() -> None:
 
     _ensure_env_file()
     _set_windows_symlink_defenses()
+    _ensure_home_dir_env()
 
     venv_dir = Path(env_name)
     if not venv_exists(venv_dir):

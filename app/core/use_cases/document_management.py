@@ -16,6 +16,7 @@ from ..ports.vector_store import VectorStore
 from ..ports.repositories import DocumentRepository, CollectionRepository
 from ..ports.llm_service import LLMService
 from ..ports.bm25_service import BM25Service
+from ..ports.token_service import TokenService
 
 
 class DocumentManagementUseCase:
@@ -31,6 +32,7 @@ class DocumentManagementUseCase:
             llm_service: LLMService,
             contextual_llm: Optional[LLMService],
             bm25_service: BM25Service,
+            token_service: Optional[TokenService] = None,
     ):
         self.document_repo = document_repo
         self.document_processor = document_processor
@@ -41,6 +43,7 @@ class DocumentManagementUseCase:
         self.llm_service = llm_service
         self.contextual_llm = contextual_llm
         self.bm25_service = bm25_service
+        self.token_service = token_service
 
     async def process_document(self, document: Document) -> Document:
         """
@@ -133,6 +136,61 @@ class DocumentManagementUseCase:
             except Exception as cleanup_error:
                 self.logger.error(f"Failed to cleanup document {document.id} state: {cleanup_error}")
 
+    def _trim_context_prefix(self, context_text: str, chunk_content: str) -> tuple[str, bool]:
+        max_tokens = getattr(settings, "EMBEDDING_MAX_TOKENS", 0) or 0
+        if max_tokens <= 0 or not self.token_service:
+            return context_text, False
+
+        base_tokens = self.token_service.count_tokens(chunk_content)
+        if base_tokens >= max_tokens:
+            self.logger.warning(
+                f"Chunk content already at {base_tokens} tokens; skipping context prefix to fit embedding limit."
+            )
+            return "", True
+
+        budget = max_tokens - base_tokens - 2
+        if budget <= 0:
+            return "", True
+
+        context_tokens = self.token_service.count_tokens(context_text)
+        if context_tokens <= budget:
+            return context_text, False
+
+        try:
+            token_ids = self.token_service.encode_text(context_text)
+            trimmed = self.token_service.decode_tokens(token_ids[:budget]).strip()
+            return trimmed, True
+        except Exception as e:
+            self.logger.warning(f"Failed to trim context by tokens, falling back to chars: {e}")
+            max_chars = max(budget * 3, 0)
+            return context_text[:max_chars].strip(), True
+
+    def _trim_chunk_for_embedding(self, chunk: DocumentChunk) -> None:
+        max_tokens = getattr(settings, "EMBEDDING_MAX_TOKENS", 0) or 0
+        if max_tokens <= 0 or not self.token_service:
+            return
+
+        token_count = self.token_service.count_tokens(chunk.content)
+        if token_count <= max_tokens:
+            return
+
+        self.logger.warning(
+            f"Chunk {chunk.id} has {token_count} tokens; truncating to {max_tokens} for embedding."
+        )
+        try:
+            token_ids = self.token_service.encode_text(chunk.content)
+            truncated = self.token_service.decode_tokens(token_ids[:max_tokens]).strip()
+        except Exception as e:
+            self.logger.warning(f"Failed to trim chunk by tokens, falling back to chars: {e}")
+            truncated = chunk.content[:max_tokens * 3].strip()
+
+        chunk.content = truncated
+        if chunk.metadata is None:
+            chunk.metadata = {}
+        chunk.metadata["embedding_truncated"] = True
+        chunk.metadata["embedding_truncated_from_tokens"] = token_count
+        chunk.metadata["token_count"] = self.token_service.count_tokens(truncated)
+
     async def _generate_embeddings_batch(
             self,
             chunks: List[DocumentChunk],
@@ -140,6 +198,9 @@ class DocumentManagementUseCase:
     ) -> List[DocumentChunk]:
         """Generate embeddings for all chunks in batch for efficiency"""
         try:
+            for chunk in chunks:
+                self._trim_chunk_for_embedding(chunk)
+
             # Extract texts for batch processing
             chunk_texts = [chunk.content for chunk in chunks]
 
@@ -236,15 +297,20 @@ class DocumentManagementUseCase:
 
             if context and context.strip():
                 # Prepend context to chunk content
-                contextualized_content = f"{context.strip()}\n\n{chunk.content}"
-                chunk.content = contextualized_content
+                raw_context = context.strip()
+                trimmed_context, was_trimmed = self._trim_context_prefix(raw_context, chunk.content)
+                if trimmed_context:
+                    contextualized_content = f"{trimmed_context}\n\n{chunk.content}"
+                    chunk.content = contextualized_content
 
                 # Update metadata
                 chunk.metadata = {
                     **chunk.metadata,
-                    'context_prefix': context.strip(),
-                    'has_context': True
+                    'context_prefix': trimmed_context,
+                    'has_context': bool(trimmed_context),
+                    'context_truncated': was_trimmed
                 }
+
             else:
                 # Mark that context generation was attempted but empty
                 chunk.metadata = {

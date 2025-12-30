@@ -24,6 +24,23 @@ from typing import Dict, Iterable, Tuple
 
 from venv_utils import REPO_ROOT
 
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        os.environ[key] = value.strip().strip('"').strip("'")
+
+
+_load_env_file(REPO_ROOT / ".env")
+
 DEFAULT_PID_FILE = Path(os.environ.get("PID_FILE", REPO_ROOT / ".run" / "uvicorn.pid"))
 DEFAULT_PROCESS_NAME = os.environ.get("PROCESS_NAME", "uvicorn")
 DEFAULT_CMD_MATCH = os.environ.get("PROCESS_CMD_MATCH", "app.main:app")
@@ -77,6 +94,71 @@ def _read_cwd(pid: int) -> str:
         return os.readlink(f"/proc/{pid}/cwd")
     except Exception:
         return ""
+
+
+def _parse_port_from_address(address: str) -> str | None:
+    address = address.strip()
+    if not address:
+        return None
+    if address.startswith("[") and "]" in address:
+        parts = address.rsplit("]:", 1)
+        if len(parts) == 2:
+            return parts[1]
+    if ":" in address:
+        return address.rsplit(":", 1)[1]
+    return None
+
+
+def _find_pids_by_port(port: str | None) -> Dict[int, str]:
+    if not port:
+        return {}
+    port = str(port).strip()
+    if not port:
+        return {}
+
+    results: Dict[int, str] = {}
+    if os.name != "nt":
+        return results
+
+    try:
+        out = subprocess.check_output(
+            ["netstat", "-ano", "-p", "tcp"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except Exception:
+        return results
+
+    for raw_line in out.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        proto = parts[0].lower()
+        if not proto.startswith("tcp"):
+            continue
+        local_addr = parts[1]
+        state = parts[3].lower()
+        pid_str = parts[4]
+        if state != "listening":
+            continue
+        local_port = _parse_port_from_address(local_addr)
+        if local_port != port:
+            continue
+        if not pid_str.isdigit():
+            continue
+        pid = int(pid_str)
+        if pid == os.getpid():
+            continue
+        cmdline = _read_cmdline(pid)
+        if cmdline:
+            results[pid] = f"port {port}: {cmdline}"
+        else:
+            results[pid] = f"port {port}"
+
+    return results
 
 
 def _looks_like_service(
@@ -186,6 +268,9 @@ def _gather_targets(pid_file: Path, process_name: str, cmd_match: str, port: str
     for pid, cmdline in _scan_processes(process_name, cmd_match, port):
         targets.setdefault(pid, f"process search: {cmdline}")
 
+    for pid, source in _find_pids_by_port(port).items():
+        targets.setdefault(pid, source)
+
     return targets
 
 
@@ -206,6 +291,17 @@ def _stop_pid(pid: int, timeout: float) -> bool:
         if not _pid_is_running(pid):
             return True
         time.sleep(0.25)
+
+    if os.name == "nt":
+        try:
+            subprocess.check_call(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            print(f"Error running taskkill for PID {pid}: {exc}")
+        return not _pid_is_running(pid)
 
     sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
     try:

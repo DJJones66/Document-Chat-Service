@@ -149,9 +149,13 @@ async def on_startup():
 
     # Token service
     token_service = TikTokenService()
+    app.state.token_service = token_service
 
     # Chunking Strategy
-    chunking_strategy = OptimizedHierarchicalChunkingStrategy(token_service)
+    chunking_strategy = OptimizedHierarchicalChunkingStrategy(
+        token_service,
+        max_embedding_tokens=settings.EMBEDDING_MAX_TOKENS
+    )
 
     # Document processor
     if settings.DOCUMENT_PROCESSOR_API_KEY:
@@ -295,6 +299,7 @@ async def on_startup():
             llm_service=app.state.llm_service,
             contextual_llm=app.state.contextual_llm_service,
             bm25_service=app.state.bm25_service,
+            token_service=app.state.token_service,
         )
 
         init_test_collection_use_case = InitializeTestCollectionUseCase(

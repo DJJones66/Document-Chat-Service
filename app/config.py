@@ -113,6 +113,11 @@ class AppSettings(BaseSettings):
         env="EMBEDDING_RETRY_DELAY", 
         description="Delay between embedding retries (seconds)."
     )
+    EMBEDDING_MAX_TOKENS: int = Field(
+        default=480,
+        env="EMBEDDING_MAX_TOKENS",
+        description="Maximum tokens for embedding inputs to avoid model context errors."
+    )
 
     # Contextual Retrieval
     ENABLE_CONTEXTUAL_RETRIEVAL: Optional[bool] = Field(

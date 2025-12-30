@@ -22,6 +22,7 @@ from ..core.ports.orchestrator import ChatOrchestrator
 from ..core.ports.clustering_service import ClusteringService
 from ..core.ports.judge_service import JudgeService
 from ..core.ports.evaluation_repository import EvaluationRepository
+from ..core.ports.token_service import TokenService
 from ..core.ports.repositories import (
     DocumentRepository, CollectionRepository, ChatRepository
 )
@@ -80,6 +81,13 @@ def get_contextual_llm_service(request: Request) -> LLMService:
     if settings.ENABLE_CONTEXTUAL_RETRIEVAL and llm is None:
         raise HTTPException(status_code=500, detail="Contextual LLMService not initialized")
     return llm
+
+
+def get_token_service(request: Request) -> TokenService:
+    token_service = getattr(request.app.state, "token_service", None)
+    if token_service is None:
+        raise HTTPException(status_code=500, detail="TokenService not initialized")
+    return token_service
 
 
 def get_model_info_service(request: Request) -> ModelInfoService:
@@ -166,6 +174,7 @@ def get_document_processing_use_case(
         llm_service: LLMService = Depends(get_llm_service),
         contextual_llm: LLMService = Depends(get_contextual_llm_service),
         bm25_service: BM25Service = Depends(get_bm25_service),
+        token_service: TokenService = Depends(get_token_service),
 ) -> DocumentManagementUseCase:
     return DocumentManagementUseCase(
         document_repo=document_repo,
@@ -176,6 +185,7 @@ def get_document_processing_use_case(
         llm_service=llm_service,
         contextual_llm=contextual_llm,
         bm25_service=bm25_service,
+        token_service=token_service,
     )
 
 

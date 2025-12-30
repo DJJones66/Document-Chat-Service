@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -11,6 +12,12 @@ def setup_logging():
     Configure root logger for the application.
     Logs to stdout in a simple format with timestamp, level, logger name, and message.
     """
+    if os.name == "nt":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 

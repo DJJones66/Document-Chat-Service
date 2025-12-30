@@ -51,6 +51,7 @@ def main() -> None:
     pid_file = Path(os.environ.get("PID_FILE", DEFAULT_PID_FILE))
     process_name = os.environ.get("PROCESS_NAME", DEFAULT_PROCESS_NAME)
     cmd_match = os.environ.get("PROCESS_CMD_MATCH", DEFAULT_CMD_MATCH)
+    process_port = os.environ.get("PROCESS_PORT") or os.environ.get("API_PORT")
     timeout = float(os.environ.get("SHUTDOWN_TIMEOUT", str(DEFAULT_TIMEOUT)))
     restart_delay = float(os.environ.get("RESTART_DELAY", "1.0"))
     venv_dir = Path(os.environ.get("VENV_PATH", DEFAULT_VENV_DIR))
@@ -63,6 +64,7 @@ def main() -> None:
         pid_file=pid_file,
         process_name=process_name,
         cmd_match=cmd_match,
+        port=process_port,
         timeout=timeout,
         quiet=False,
     )
