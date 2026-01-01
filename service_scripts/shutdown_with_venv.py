@@ -44,11 +44,21 @@ _load_env_file(REPO_ROOT / ".env")
 DEFAULT_PID_FILE = Path(os.environ.get("PID_FILE", REPO_ROOT / ".run" / "uvicorn.pid"))
 DEFAULT_PROCESS_NAME = os.environ.get("PROCESS_NAME", "uvicorn")
 DEFAULT_CMD_MATCH = os.environ.get("PROCESS_CMD_MATCH", "app.main:app")
-DEFAULT_PROCESS_PORT = os.environ.get("PROCESS_PORT") or os.environ.get("API_PORT")
+DEFAULT_PROCESS_PORT = os.environ.get("PROCESS_PORT") or os.environ.get("API_PORT") or "18000"
 DEFAULT_TIMEOUT = float(os.environ.get("SHUTDOWN_TIMEOUT", "10"))
 
 
 def _pid_is_running(pid: int) -> bool:
+    if os.name == "nt":
+        try:
+            out = subprocess.check_output(
+                ["tasklist", "/FI", f"PID eq {pid}"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            return str(pid) in out
+        except Exception:
+            return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -187,10 +197,13 @@ def _looks_like_service(
             cwd_ok = cwd_path == REPO_ROOT or REPO_ROOT in cwd_path.parents
         except Exception:
             cwd_ok = False
-    if cwd or port_token:
-        scope_ok = cwd_ok or (bool(port_token) and port_ok)
+    repo_root = str(REPO_ROOT).lower()
+    repo_name = REPO_ROOT.name.lower()
+    repo_ok = repo_root in lowered or (repo_name and repo_name in lowered)
+    if port_token:
+        scope_ok = port_ok
     else:
-        scope_ok = True
+        scope_ok = cwd_ok or repo_ok
     return name_ok and cmd_ok and port_ok and scope_ok
 
 
@@ -265,16 +278,29 @@ def _gather_targets(pid_file: Path, process_name: str, cmd_match: str, port: str
             print(f"PID {file_pid} from {pid_file} is not running. Removing stale pid file.")
             pid_file.unlink(missing_ok=True)
 
-    for pid, cmdline in _scan_processes(process_name, cmd_match, port):
-        targets.setdefault(pid, f"process search: {cmdline}")
-
     for pid, source in _find_pids_by_port(port).items():
         targets.setdefault(pid, source)
+
+    port_token = str(port).strip() if port else ""
+    if not port_token:
+        for pid, cmdline in _scan_processes(process_name, cmd_match, port):
+            targets.setdefault(pid, f"process search: {cmdline}")
 
     return targets
 
 
 def _stop_pid(pid: int, timeout: float) -> bool:
+    def _taskkill(target_pid: int) -> bool:
+        try:
+            subprocess.check_call(
+                ["taskkill", "/PID", str(target_pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            print(f"Error running taskkill for PID {target_pid}: {exc}")
+        return not _pid_is_running(target_pid)
+
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -284,6 +310,8 @@ def _stop_pid(pid: int, timeout: float) -> bool:
         return False
     except OSError as exc:
         print(f"Error sending SIGTERM to PID {pid}: {exc}")
+        if os.name == "nt":
+            return _taskkill(pid)
         return False
 
     deadline = time.time() + timeout
@@ -293,15 +321,7 @@ def _stop_pid(pid: int, timeout: float) -> bool:
         time.sleep(0.25)
 
     if os.name == "nt":
-        try:
-            subprocess.check_call(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as exc:
-            print(f"Error running taskkill for PID {pid}: {exc}")
-        return not _pid_is_running(pid)
+        return _taskkill(pid)
 
     sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
     try:
@@ -327,6 +347,8 @@ def shutdown_service(
     """
     Attempt to stop the running service. Returns True if the service is no longer running.
     """
+    # Option: for extra safety, require a port or repo cwd match before stopping anything.
+    # If needed, enforce that here by returning early when port/cwd cannot be validated.
     targets = _gather_targets(pid_file, process_name, cmd_match, port)
     if not targets:
         if not quiet:

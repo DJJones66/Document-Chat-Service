@@ -90,7 +90,7 @@ def main() -> None:
     try:
         subprocess.check_call(cmd, cwd=REPO_ROOT)
     except subprocess.CalledProcessError as exc:
-        if exc.returncode in (-signal.SIGTERM, -signal.SIGINT):
+        if exc.returncode in (-signal.SIGTERM, -signal.SIGINT, signal.SIGTERM, signal.SIGINT, 3221225786):
             print("Service stopped.")
             return
         raise
