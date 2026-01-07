@@ -217,7 +217,10 @@ async def on_startup():
     )
     logger.info(f"Initialized model info service (default context window: {settings.DEFAULT_CONTEXT_WINDOW})")
 
-    await verify_ollama_services(app)
+    if os.getenv("OLLAMA_HEALTH_SKIP", "0").lower() in {"1", "true", "yes", "on"}:
+        logger.warning("Skipping Ollama health checks (OLLAMA_HEALTH_SKIP=1).")
+    else:
+        await verify_ollama_services(app)
 
     # Vector store
     persist_dir = settings.CHROMA_PERSIST_DIR

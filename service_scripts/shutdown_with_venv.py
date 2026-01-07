@@ -282,7 +282,7 @@ def _gather_targets(pid_file: Path, process_name: str, cmd_match: str, port: str
         targets.setdefault(pid, source)
 
     port_token = str(port).strip() if port else ""
-    if not port_token:
+    if not port_token or not targets:
         for pid, cmdline in _scan_processes(process_name, cmd_match, port):
             targets.setdefault(pid, f"process search: {cmdline}")
 
