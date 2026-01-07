@@ -53,3 +53,5 @@
 - Cleaned up leftover uvicorn on port 18081 from earlier run via `API_PORT=18081 .venv/bin/python service_scripts/shutdown_with_venv.py`.
 - Full test run with remote Ollama: `REQUIRE_OLLAMA=1 OLLAMA_REMOTE_HOST=10.1.2.149` set; start/health/restart/health/shutdown completed successfully.
 - Verified script reports `Using Ollama base URL: http://10.1.2.149:11434` during full test run.
+- Services runtime install issue: `/Users/djjones/BrainDrive-Core/backend/services_runtime/Document-Chat-Service` had no `.venv`; `install_with_venv.py --full` timed out after 300s, then `restart_with_venv.py` failed with "Venv not found".
+- Mitigation added: `service_scripts/install_with_venv.py` now auto-creates the venv when missing (can disable with `AUTO_CREATE_VENV=0`); still need enough time for full pip install.

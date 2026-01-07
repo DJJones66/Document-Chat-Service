@@ -10,6 +10,7 @@ Environment overrides:
   VENV_PATH        Path to venv directory (default: .venv at repo root)
   FULL_INSTALL     Set to 1/true to force requirements.txt install
   UPGRADE_PIP      Set to 0/false to skip pip upgrade
+  AUTO_CREATE_VENV Set to 0/false to disable auto-creating the venv when missing
 """
 from __future__ import annotations
 
@@ -142,7 +143,13 @@ def main() -> None:
 
     venv_dir = Path(os.environ.get("VENV_PATH", DEFAULT_VENV_DIR))
     if not venv_exists(venv_dir):
-        sys.exit(f"Venv not found at {venv_dir}. Run tests/create_venv.py first.")
+        auto_create = _as_bool(os.environ.get("AUTO_CREATE_VENV"), default=True)
+        if auto_create:
+            print(f"Venv not found at {venv_dir}; creating it now.")
+            create_script = REPO_ROOT / "service_scripts" / "create_venv.py"
+            subprocess.check_call([sys.executable, str(create_script)], cwd=REPO_ROOT)
+        if not venv_exists(venv_dir):
+            sys.exit(f"Venv not found at {venv_dir}. Run service_scripts/create_venv.py first.")
 
     full_install = args.full or _as_bool(os.environ.get("FULL_INSTALL"))
     if not full_install and _pyproject_disallows_editable():
