@@ -24,7 +24,7 @@ from pathlib import Path
 
 from venv_utils import DEFAULT_VENV_DIR, REPO_ROOT, venv_exists, venv_python
 
-DEFAULT_OLLAMA_EMBED_MODEL = "mxbai-embed-large"
+DEFAULT_OLLAMA_EMBED_MODEL = "nomic-embed-text"
 OLLAMA_MODEL_KEYS = (
     "OLLAMA_EMBEDDING_MODEL",
     "OLLAMA_LLM_MODEL",
